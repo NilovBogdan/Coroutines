@@ -1,136 +1,142 @@
-import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
+
 import kotlinx.coroutines.*
-import okhttp3.*
-import okhttp3.logging.HttpLoggingInterceptor
-import java.io.IOException
-import java.util.concurrent.TimeUnit
 import kotlin.coroutines.*
 
-data class Post(
-    val id: Long,
-    val authorId: Long,
-    val content: String,
-    val published: Long,
-    val likedByMe: Boolean,
-    val likes: Int = 0,
-    var attachment: Attachment? = null,
-)
 
-data class Attachment(
-    val url: String,
-    val description: String,
-    val type: AttachmentType,
-)
 
-enum class AttachmentType {
-    IMAGE
-}
-
-data class Comment(
-    val id: Long,
-    val postId: Long,
-    val authorId: Long,
-    val content: String,
-    val published: Long,
-    val likedByMe: Boolean,
-    val likes: Int = 0,
-)
-
-data class Author(
-    val id: Long,
-    val name: String,
-    val avatar: String,
-)
-
-data class Comments(
-    val comment: Comment,
-    val authorComment: Author
-
-)
-
-data class NewPost(
-    val post: Post,
-    val authorPost: Author,
-    val commentsPost: List<Comments>
-)
-
-private val gson = Gson()
-private val BASE_URL = "http://127.0.0.1:9999"
-fun main() {
-    val client = OkHttpClient.Builder()
-        .addInterceptor(HttpLoggingInterceptor(::println).apply {
-            level = HttpLoggingInterceptor.Level.BODY
-        })
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .build()
-
-    with(CoroutineScope(EmptyCoroutineContext)) {
-
+fun main() = runBlocking {
+    val job = CoroutineScope(EmptyCoroutineContext).launch {
         launch {
-            try {
-                val posts = getPosts(client)
-                    .map { post ->
-                        val com = getComments(client, post.id).map {
-                            async {
-                                Comments(it, getAuthor(client, it.authorId))
-                            }
-                        }.awaitAll()
-                        async {
-                            NewPost(post, getAuthor(client, post.authorId), com)
-                        }
-
-                    }.awaitAll()
-                println(posts)
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+            delay(500)
+            println("ok") // <--Нет, так как родительская карутина отменяется до запуска дочерних
+        }
+        launch {
+            delay(500)
+            println("ok")
         }
     }
-    Thread.sleep(30_000L)
-
+    delay(100)
+    job.cancelAndJoin()
 }
-
-suspend fun OkHttpClient.apiCall(url: String): Response {
-    return suspendCoroutine { continuation ->
-        Request.Builder()
-            .url(url)
-            .build()
-            .let(::newCall)
-            .enqueue(object : Callback {
-                override fun onResponse(call: Call, response: Response) {
-                    continuation.resume(response)
-                }
-
-                override fun onFailure(call: Call, e: IOException) {
-                    continuation.resumeWithException(e)
-                }
-            })
-    }
-}
-
-suspend fun <T> makeRequest(url: String, client: OkHttpClient, typeToken: TypeToken<T>): T =
-    withContext(Dispatchers.IO) {
-        client.apiCall(url)
-            .let { response ->
-                if (!response.isSuccessful) {
-                    response.close()
-
-                    throw RuntimeException(response.message)
-                }
-
-                val body = response.body ?: throw RuntimeException("response body is null")
-                gson.fromJson(body.string(), typeToken.type)
-
-            }
-    }
-
-suspend fun getPosts(client: OkHttpClient): List<Post> =
-    makeRequest("$BASE_URL/api/posts", client, object : TypeToken<List<Post>>() {})
-
-
-suspend fun getComments(client: OkHttpClient, id: Long): List<Comment> =
-    makeRequest("$BASE_URL/api/posts/$id/comments", client, object : TypeToken<List<Comment>>() {})
-
-suspend fun getAuthor(client: OkHttpClient, id: Long): Author =
-    makeRequest("$BASE_URL/api/authors/$id", client, object : TypeToken<Author>() {})
+//fun main() = runBlocking {
+//    val job = CoroutineScope(EmptyCoroutineContext).launch {
+//        val child = launch {
+//            println(isActive)
+//            delay(500)
+//            println("ok") // <--Нет, так как карутина была отменена раньше, чем отработал println
+//        }
+//        launch {
+//            println(isActive)
+//            delay(500)
+//            println("ok")
+//        }
+//        delay(100)
+//        child.cancel()
+//    }
+//    delay(100)
+//    job.join()
+//}
+//fun main() {
+//    with(CoroutineScope(EmptyCoroutineContext)) {
+//        try {
+//            launch {
+//                throw Exception("something bad happened")
+//            }
+//        } catch (e: Exception) {
+//            e.printStackTrace() // <-- Нет, так как исключение не перехвачено в дочерней корутине и соответственно она аварийно завершается, завершается так же и родительская корутина, try catch должен быть внутри метода launch
+//        }
+//    }
+//    Thread.sleep(1000)
+//}
+//fun main() {
+//    CoroutineScope(EmptyCoroutineContext).launch {
+//        try {
+//            coroutineScope {
+//                throw Exception("something bad happened")
+//            }
+//        } catch (e: Exception) {
+//            e.printStackTrace() // <--Да, так как coroutineScope перехватывает ошибки и предоставляет их родительской, далее родительская корутина обрабатывает их в try catch и сохраняет свое активное состояние
+//        }
+//    }
+//    Thread.sleep(1000)
+//}
+//fun main() {
+//    CoroutineScope(EmptyCoroutineContext).launch {
+//        try {
+//            supervisorScope {
+//                throw Exception("something bad happened")
+//            }
+//        } catch (e: Exception) {
+//            e.printStackTrace() // <--Да, так как supervisorScope создает реализацию job которая не влияет на родительскую
+//        }
+//    }
+//    Thread.sleep(1000)
+//}
+//fun main() {
+//    CoroutineScope(EmptyCoroutineContext).launch {
+//        try {
+//            coroutineScope {
+//                launch {
+//                    delay(500)
+//                    throw Exception("something bad happened") // <-- Нет, так как в coroutineScope первой поступает исключние из второй дочерней корутины и на этом coroutineScope завершает свою работу передавая информацию об исключении в родительскую корутину
+//                }
+//                launch {
+//                    throw Exception("something bad happened")
+//                }
+//            }
+//        } catch (e: Exception) {
+//            e.printStackTrace()
+//        }
+//    }
+//    Thread.sleep(1000)
+//}
+//fun main() {
+//    CoroutineScope(EmptyCoroutineContext).launch {
+//        try {
+//            supervisorScope {
+//                launch {
+//                    delay(500)
+//                    throw Exception("something bad happened") // <--Да, так как supervisorScope не затрагивая работу дочерних и соседних корутин, обе дочерние корутины завершают свою работу
+//                }
+//                launch {
+//                    throw Exception("something bad happened")
+//                }
+//            }
+//        } catch (e: Exception) {
+//            e.printStackTrace() // <--Нет, так как блок try catch должен находиться внутри supervisorScope, для каждой дочерней корутины
+//        }
+//    }
+//    Thread.sleep(1000)
+//}
+//fun main() {
+//    CoroutineScope(EmptyCoroutineContext).launch {
+//        CoroutineScope(EmptyCoroutineContext).launch {
+//            launch {
+//                delay(1000)
+//                println("ok") // <-- Нет, так как исключение мы получаем быстрей, чем дочерние корутины успевают завершить твою работу
+//            }
+//            launch {
+//                delay(500)
+//                println("ok")
+//            }
+//            throw Exception("something bad happened")
+//        }
+//    }
+//    Thread.sleep(1000)
+//}
+//fun main() {
+//    CoroutineScope(EmptyCoroutineContext).launch {
+//        CoroutineScope(EmptyCoroutineContext + SupervisorJob()).launch {
+//            launch {
+//                delay(1000)
+//                println("ok") // <-- нет, так как исключение происходит в родительской корутине SupervisorJob, отменяются дочерние корутины
+//            }
+//            launch {
+//                delay(500)
+//                println("ok")
+//            }
+//            throw Exception("something bad happened")
+//        }
+//    }
+//    Thread.sleep(1000)
+//}
